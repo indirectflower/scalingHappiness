@@ -493,6 +493,7 @@ function PluginDefinition:init(api)
             cycle_state = "hide",
             cycle_at = 0,
             cycle_target = nil,
+            angle = 0,
             mode = nil,
             mode_at = 0,
             m1_down = false,
@@ -580,8 +581,10 @@ function PluginDefinition:init(api)
         end
 
         local function apply_weapon(wanted)
-            if rt.force_melee then
+            if rt.force_melee or rt.hover_melee then
                 wanted = "melee"
+            else
+                wanted = "gun"
             end
             if rt.weapon ~= wanted then
                 press_slot(wanted)
@@ -739,9 +742,9 @@ function PluginDefinition:init(api)
             { label = "Giant Gargoyle (F10 boss)", match = { "giantgargoyle" },
                 prio = 40, radius = 30, height = 15, hide = "hover", swap = 10 },
             { label = "Acidic Gargoyle", match = { "acidic" },
-                prio = 50, radius = 10, height = 10, hide = "none", swap = 15 },
+                prio = 100, radius = 10, height = 10, hide = "none", swap = 15 },
             { label = "Gargoyle", match = { "gargoyle" },
-                prio = 50, radius = 10, height = 10, hide = "none", swap = 15 },
+                prio = 100, radius = 10, height = 10, hide = "none", swap = 15 },
             { label = "Electric / Tesla Zombie", match = { "tesla", "electric" },
                 prio = 0, radius = 30, height = 15, hide = "none", swap = 15 },
             { label = "Dark Matter Baby", match = { "darkmatter", "baby" },
@@ -750,10 +753,10 @@ function PluginDefinition:init(api)
                 prio = 0, radius = 10, height = 0, hide = "none", swap = 15 },
 
             { label = "Ghost", match = { "ghost" },
-                prio = 50, radius = 10, height = 0, hide = "hover", swap = 15 },
+                prio = 100, radius = 10, height = 0, hide = "hover", swap = 15 },
             { label = "Reaper (Grim Reaper)", match = { "reaper", "grim" },
-                prio = 60, radius = 10, height = 0, hide = "none", swap = 15,
-                stand = { x = 15, y = 3, gun = true } },
+                prio = 110, radius = 10, height = 0, hide = "none", swap = 15,
+                orbit = { radius = 25, speed = 40, y = 3, gun = true } },
             { label = "Skeleton", match = { "skeleton" },
                 prio = 10, radius = nil, height = 0, hide = "none", swap = 15 },
             { label = "Exploding Zombie", match = { "explo" },
@@ -831,10 +834,9 @@ function PluginDefinition:init(api)
             return best, best_part, best_d
         end
 
-        local SCAN_RADIUS = 5
+        local SCAN_RADIUS = 10
         local SCAN_PATTERNS = { "ghost", "reaper", "grim" }
 
-        -- true while any living Ghost / Black Ghost / Reaper is within SCAN_RADIUS studs
         local function ghost_reaper_near(origin)
             for _, ent in entities() do
                 local key = string.lower(ent.Name):gsub("[^%a]", "")
@@ -1278,7 +1280,6 @@ function PluginDefinition:init(api)
                 end
             end
 
-            -- scanner: ghost/reaper within 5 studs -> gun off (melee); clear -> back to normal
             rt.force_melee = ghost_reaper_near(root.Position)
 
             local now = os.clock()
@@ -1368,6 +1369,7 @@ function PluginDefinition:init(api)
 
             local plan = plan_for(target_ent.Name)
             local target_pos = target_part.Position
+            rt.hover_melee = false
 
             if plan.cycle then
                 apply_weapon((rt.melee_deadline ~= nil and now >= rt.melee_deadline) and "gun" or "melee")
@@ -1385,6 +1387,28 @@ function PluginDefinition:init(api)
                 local hiding = rt.cycle_state == "hide"
                 local offset_x = hiding and c.hide_x or c.attack_x
                 local cf = safe_cframe_for(target_pos + Vector3.new(offset_x, 0, 0), hiding and c.hide_y or c.attack_y)
+                rt.hit_pending = false
+                rt.last_cf = cf
+                rt.cam_mode = "mob"
+                rt.cam_target = target_pos
+                pcall(function()
+                    root.CFrame = cf
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+                m1_hold(now)
+                return
+            end
+
+            if plan.orbit then
+                local o = plan.orbit
+                apply_weapon(o.gun and "gun" or "melee")
+                rt.angle = (rt.angle + (o.speed / o.radius) * dt) % (math.pi * 2)
+                local base = target_pos + Vector3.new(math.cos(rt.angle) * o.radius, 0, math.sin(rt.angle) * o.radius)
+                local cf = safe_cframe_for(base, o.y)
+                local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
+                if (look_at - cf.Position).Magnitude > 0.1 then
+                    cf = CFrame.lookAt(cf.Position, look_at)
+                end
                 rt.hit_pending = false
                 rt.last_cf = cf
                 rt.cam_mode = "mob"
@@ -1427,9 +1451,8 @@ function PluginDefinition:init(api)
                 rt.mode = rt.mode == "hover" and "far" or "hover"
             end
 
-            local want_gun = plan.gun
-                or (rt.melee_deadline ~= nil and now >= rt.melee_deadline)
-            apply_weapon(want_gun and "gun" or "melee")
+            rt.hover_melee = rt.mode == "hover"
+            apply_weapon("gun")
 
             if rt.mode == "hover" then
                 local cf = safe_cframe_for(target_pos, math.max(HOVER_HEIGHT, plan.height))
