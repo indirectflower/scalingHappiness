@@ -892,31 +892,6 @@ function PluginDefinition:init(api)
             end
         end
 
-        local function tower_entry_tp()
-            local tower = get_tower()
-            if not tower then return end
-            local now = os.clock()
-            if now < (rt.entry_tp_next or 0) then
-                return
-            end
-            rt.entry_tp_next = now + 2
-            local entry, entry_y = nil, math.huge
-            for _, trig in CollectionService:GetTagged("MobTrigger") do
-                if trig:IsA("BasePart") and trig:IsDescendantOf(tower) and trig.Position.Y < entry_y then
-                    entry, entry_y = trig, trig.Position.Y
-                end
-            end
-            if not entry then return end
-            local char = zt_lp.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-            local dest = entry.Position + Vector3.new(0, math.max(entry.Size.Y / 2 + 3, 4), 0)
-            pcall(function()
-                root.CFrame = CFrame.new(dest) * root.CFrame.Rotation
-                root.AssemblyLinearVelocity = Vector3.zero
-            end)
-        end
-
         local blocked_params = OverlapParams.new()
         blocked_params.FilterType = Enum.RaycastFilterType.Include
         local safe_params = OverlapParams.new()
@@ -1409,7 +1384,6 @@ function PluginDefinition:init(api)
                     equip_melee_slot()
                 end
                 advance(part)
-                tower_entry_tp()
                 return
             end
 
