@@ -558,6 +558,7 @@ function PluginDefinition:init(api)
 
         local SLOT_CLICK_PAUSE = 0.15
         local SLOT_PRESS_GAP = 0.25
+        local SLOT_UNEQUIP_GAP = 0.12
 
         local function press_slot(weapon)
             local now = os.clock()
@@ -566,8 +567,22 @@ function PluginDefinition:init(api)
             end
             rt.slot_last_press = now
             rt.weapon = weapon
-            rt.click_pause_until = now + SLOT_CLICK_PAUSE
-            tap_key(weapon == "gun" and Enum.KeyCode.One or Enum.KeyCode.Two)
+            rt.click_pause_until = now + SLOT_CLICK_PAUSE + SLOT_UNEQUIP_GAP
+            local char = zt_lp.Character
+            local held = char and char:FindFirstChildOfClass("Tool")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and held then
+                pcall(function()
+                    hum:UnequipTools()
+                end)
+                task.delay(SLOT_UNEQUIP_GAP, function()
+                    if rt.weapon == weapon then
+                        tap_key(weapon == "gun" and Enum.KeyCode.One or Enum.KeyCode.Two)
+                    end
+                end)
+            else
+                tap_key(weapon == "gun" and Enum.KeyCode.One or Enum.KeyCode.Two)
+            end
         end
 
         local function equip_melee_slot()
@@ -581,7 +596,9 @@ function PluginDefinition:init(api)
         end
 
         local function apply_weapon(wanted)
-            if rt.force_melee then
+            local now = os.clock()
+            if rt.force_melee
+                and not (rt.melee_deadline ~= nil and now >= rt.melee_deadline) then
                 wanted = "melee"
             end
             if rt.weapon ~= wanted then
