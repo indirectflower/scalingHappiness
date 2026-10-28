@@ -486,8 +486,6 @@ function PluginDefinition:init(api)
         local SWAP_SCAN_SECONDS = 0.5
         local MELEE_GIVEUP_SECONDS = 5
         local SWAP_MARGIN_STUDS = 6
-        local VOID_CHECK_INTERVAL = 0.2
-        local VOID_Y_LIMIT = -600
         local rt = {
             lock_ent = nil,
             lock_hp = 0,
@@ -497,7 +495,6 @@ function PluginDefinition:init(api)
             weapon = nil,
             slot_last_press = 0,
             melee_deadline = nil,
-            void_check_next = 0,
             cycle_state = "hide",
             cycle_at = 0,
             cycle_target = nil,
@@ -1305,18 +1302,6 @@ function PluginDefinition:init(api)
             if not (root and part) or (hum and hum.Health <= 0) then
                 m1_set(false)
                 return
-            end
-
-            local now_void = os.clock()
-            if now_void >= rt.void_check_next then
-                rt.void_check_next = now_void + VOID_CHECK_INTERVAL
-                if root.Position.Y < VOID_Y_LIMIT and rt.last_cf then
-                    pcall(function()
-                        root.CFrame = rt.last_cf + Vector3.new(0, 3, 0)
-                        root.AssemblyLinearVelocity = Vector3.zero
-                    end)
-                    rt.mode = nil
-                end
             end
 
             for drop in drops do
