@@ -755,7 +755,7 @@ function PluginDefinition:init(api)
             { label = "Giant Chombie (F17 boss)", match = { "giantchombie", "giantchrombie" },
                 prio = 40, radius = 30, height = 15, hide = "hover", swap = 10 },
             { label = "Chombie Egg (spawner)", match = { "egg" },
-                prio = 30, radius = 6, height = 0, hide = "hover", swap = 15 },
+                prio = 25, radius = 6, height = 0, hide = "hover", swap = 15 },
 
             { label = "Acidic Gargoyle Overlord (F17 boss)", match = { "overlord" },
                 prio = 40, radius = 30, height = 15, hide = "none", swap = 15 },
@@ -778,7 +778,7 @@ function PluginDefinition:init(api)
                 prio = 110, radius = 10, height = 0, hide = "none", swap = 15,
                 orbit = { radius = 25, speed = 40, y = 3, gun = true } },
             { label = "Skeleton", match = { "skeleton" },
-                prio = 10, radius = nil, height = 0, hide = "none", swap = 15 },
+                prio = 30, radius = nil, height = 0, hide = "none", swap = 15 },
             { label = "Exploding Zombie", match = { "explo" },
                 prio = 5, radius = 30, height = 15, hide = "none", swap = 15, gun = true },
             { label = "Charger Zombie", match = { "charger" },
