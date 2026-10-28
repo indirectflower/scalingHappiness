@@ -1352,7 +1352,7 @@ function PluginDefinition:init(api)
                             if locked_part then
                                 local swap_dist = (swap_part.Position - part.Position).Magnitude
                                 local locked_dist = (locked_part.Position - part.Position).Magnitude
-                                if swap_dist + SWAP_MARGIN_STUDS < locked_dist then
+                                if swap_dist < locked_dist then
                                     do_swap = true
                                 end
                             else
