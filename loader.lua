@@ -581,10 +581,8 @@ function PluginDefinition:init(api)
         end
 
         local function apply_weapon(wanted)
-            if rt.force_melee or rt.hover_melee then
+            if rt.force_melee then
                 wanted = "melee"
-            else
-                wanted = "gun"
             end
             if rt.weapon ~= wanted then
                 press_slot(wanted)
@@ -772,7 +770,7 @@ function PluginDefinition:init(api)
                 prio = 0, radius = nil, height = 0, hide = "hover", swap = SWAP_SECONDS },
             { label = "Chicken", match = { "chicken" },
                 prio = 50, radius = nil, height = 0, hide = "none", swap = SWAP_SECONDS,
-                stand = { x = 35, y = 0, gun = true } },
+                stand = { x = 0, y = 3 } },
         }
         local DEFAULT_PLAN = {
             label = "Basic Zombie / default", prio = 0, radius = nil, height = 0,
@@ -1369,7 +1367,6 @@ function PluginDefinition:init(api)
 
             local plan = plan_for(target_ent.Name)
             local target_pos = target_part.Position
-            rt.hover_melee = false
 
             if plan.cycle then
                 apply_weapon((rt.melee_deadline ~= nil and now >= rt.melee_deadline) and "gun" or "melee")
@@ -1451,8 +1448,10 @@ function PluginDefinition:init(api)
                 rt.mode = rt.mode == "hover" and "far" or "hover"
             end
 
-            rt.hover_melee = rt.mode == "hover"
-            apply_weapon("gun")
+            local want_gun = plan.gun
+                or rt.mode == "far"
+                or (rt.melee_deadline ~= nil and now >= rt.melee_deadline)
+            apply_weapon(want_gun and "gun" or "melee")
 
             if rt.mode == "hover" then
                 local cf = safe_cframe_for(target_pos, math.max(HOVER_HEIGHT, plan.height))
