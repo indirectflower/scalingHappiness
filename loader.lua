@@ -495,6 +495,11 @@ function PluginDefinition:init(api)
             weapon = nil,
             slot_last_press = 0,
             melee_deadline = nil,
+            stage = nil,
+            stage_check_at = 0,
+            stage10_sign = 1,
+            stage10_flip_at = 0,
+            stage10_dip = nil,
             cycle_state = "hide",
             cycle_at = 0,
             cycle_target = nil,
@@ -823,6 +828,14 @@ function PluginDefinition:init(api)
                 return 0
             end
             return FAR_ORBIT_RADIUS
+        end
+
+        local function is_stage10_target(ent)
+            local key = string.lower(ent.Name):gsub("[^%a]", "")
+            for _, p in ipairs({ "ghost", "reaper", "grim" }) do
+                if key:find(p, 1, true) then return true end
+            end
+            return false
         end
 
         local function start_mode(ent)
@@ -1304,6 +1317,26 @@ function PluginDefinition:init(api)
 
             local now = os.clock()
 
+            if now >= (rt.stage_check_at or 0) then
+                rt.stage_check_at = now + 1
+                rt.stage = nil
+                for _, ent in ipairs(entities()) do
+                    if plan_for(ent.Name) == plan_for("Chicken Trojan") then
+                        rt.stage = 10
+                        break
+                    end
+                end
+            end
+            local is_stage10 = rt.stage == 10
+            local stage10_sign = 1
+            if is_stage10 then
+                if now >= (rt.stage10_flip_at or 0) then
+                    rt.stage10_flip_at = now + 2
+                    rt.stage10_sign = (rt.stage10_sign or 1) * -1
+                end
+                stage10_sign = rt.stage10_sign or 1
+            end
+
             if now < rt.weapon_choice_until and now >= rt.next_choice_scan then
                 rt.next_choice_scan = now + 0.25
                 if try_choose_first_weapon() then
@@ -1390,6 +1423,51 @@ function PluginDefinition:init(api)
             local plan = plan_for(target_ent.Name)
             local target_pos = target_part.Position
 
+            if is_stage10 and not is_stage10_target(target_ent) then
+                local dip = rt.stage10_dip or { state = "attack", t = now }
+                if dip.state == "attack" then
+                    if now >= dip.t + 0.01 then
+                        dip.state = "hide"
+                        dip.t = now
+                    end
+                    local cf = safe_cframe_for(target_pos + Vector3.new(0, 5, 0))
+                    local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
+                    if (look_at - cf.Position).Magnitude > 0.1 then
+                        cf = CFrame.lookAt(cf.Position, look_at)
+                    end
+                    rt.last_cf = cf
+                    rt.cam_mode = "mob"
+                    rt.cam_target = target_pos
+                    pcall(function()
+                        root.CFrame = cf
+                        root.AssemblyLinearVelocity = Vector3.zero
+                    end)
+                    apply_weapon("melee")
+                    m1_hold(now)
+                else
+                    if now >= dip.t + 0.5 then
+                        dip.state = "attack"
+                        dip.t = now
+                    end
+                    local cf = safe_cframe_for(target_pos + Vector3.new(0, 1999, 0))
+                    local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
+                    if (look_at - cf.Position).Magnitude > 0.1 then
+                        cf = CFrame.lookAt(cf.Position, look_at)
+                    end
+                    rt.last_cf = cf
+                    rt.cam_mode = "mob"
+                    rt.cam_target = target_pos
+                    pcall(function()
+                        root.CFrame = cf
+                        root.AssemblyLinearVelocity = Vector3.zero
+                    end)
+                    m1_set(false)
+                    apply_weapon("melee")
+                end
+                rt.stage10_dip = dip
+                return
+            end
+
             if plan.cycle then
                 apply_weapon((rt.melee_deadline ~= nil and now >= rt.melee_deadline) and "gun" or "melee")
                 local c = plan.cycle
@@ -1422,8 +1500,14 @@ function PluginDefinition:init(api)
                 local o = plan.orbit
                 apply_weapon(o.gun and "gun" or "melee")
                 rt.angle = (rt.angle + (o.speed / o.radius) * dt) % (math.pi * 2)
-                local base = target_pos + Vector3.new(math.cos(rt.angle) * o.radius, 0, math.sin(rt.angle) * o.radius)
-                local cf = safe_cframe_for(base, o.y)
+                local ox = math.cos(rt.angle) * o.radius
+                local oy = o.y
+                if is_stage10 and is_stage10_target(target_ent) then
+                    ox = stage10_sign * math.abs(ox)
+                    oy = stage10_sign * math.abs(oy)
+                end
+                local base = target_pos + Vector3.new(ox, 0, math.sin(rt.angle) * o.radius)
+                local cf = safe_cframe_for(base, oy)
                 local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
                 if (look_at - cf.Position).Magnitude > 0.1 then
                     cf = CFrame.lookAt(cf.Position, look_at)
@@ -1476,7 +1560,13 @@ function PluginDefinition:init(api)
             apply_weapon(want_gun and "gun" or "melee")
 
             if rt.mode == "hover" then
-                local cf = safe_cframe_for(target_pos, math.max(HOVER_HEIGHT, plan.height))
+                local hy = math.max(HOVER_HEIGHT, plan.height)
+                local hx = 0
+                if is_stage10 and is_stage10_target(target_ent) then
+                    hx = stage10_sign * 5
+                    hy = stage10_sign * hy
+                end
+                local cf = safe_cframe_for(target_pos + Vector3.new(hx, 0, 0), hy)
                 local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
                 if (look_at - cf.Position).Magnitude > 0.1 then
                     cf = CFrame.lookAt(cf.Position, look_at)
