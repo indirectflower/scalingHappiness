@@ -251,16 +251,9 @@ function PluginDefinition:init(api)
                         makefolder(dir)
                     end
                 end
-                writefile(AUTOLOAD_FILE, table.concat({
-                    "local ok, err = pcall(function()",
-                    "    local src = game:HttpGet(\"" .. LOADER_URL .. "\")",
-                    "    assert(type(src) == \"string\" and #src > 0, \"HttpGet: non-string response\")",
-                    "    local fn, ferr = loadstring(src, \"HarryExtensionsAutoload\")",
-                    "    if not fn then error(tostring(ferr)) end",
-                    "    fn()",
-                    "end)",
-                    "if not ok then warn(\"[Harry Extensions] Autoload failed: \" .. tostring(err)) end",
-                }, "\n") .. "\n")
+                local src = readfile("harry_extensions_full.lua")
+                assert(type(src) == "string" and #src > 0, "plugin file unreadable")
+                writefile(AUTOLOAD_FILE, src)
             elseif type(isfile) == "function" and isfile(AUTOLOAD_FILE) then
                 delfile(AUTOLOAD_FILE)
             end
@@ -1321,11 +1314,14 @@ function PluginDefinition:init(api)
                 rt.stage_check_at = now + 1
                 rt.stage = nil
                 for _, d in ipairs(Workspace:GetDescendants()) do
-                    if d:IsA("Model") and d:FindFirstChildOfClass("Humanoid") then
-                        local key = string.lower(d.Name):gsub("[^%a]", "")
-                        if key:find("chicken", 1, true) then
-                            rt.stage = 10
-                            break
+                    if d:IsA("Model") then
+                        local hum = d:FindFirstChildOfClass("Humanoid")
+                        if hum and hum.Health > 0 then
+                            local key = string.lower(d.Name):gsub("[^%a]", "")
+                            if key:find("chicken", 1, true) then
+                                rt.stage = 10
+                                break
+                            end
                         end
                     end
                 end
