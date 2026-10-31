@@ -1320,10 +1320,13 @@ function PluginDefinition:init(api)
             if now >= (rt.stage_check_at or 0) then
                 rt.stage_check_at = now + 1
                 rt.stage = nil
-                for _, ent in ipairs(entities()) do
-                    if plan_for(ent.Name) == plan_for("Chicken Trojan") then
-                        rt.stage = 10
-                        break
+                for _, d in ipairs(Workspace:GetDescendants()) do
+                    if d:IsA("Model") and d:FindFirstChildOfClass("Humanoid") then
+                        local key = string.lower(d.Name):gsub("[^%a]", "")
+                        if key:find("chicken", 1, true) then
+                            rt.stage = 10
+                            break
+                        end
                     end
                 end
             end
@@ -1423,7 +1426,7 @@ function PluginDefinition:init(api)
             local plan = plan_for(target_ent.Name)
             local target_pos = target_part.Position
 
-            if is_stage10 and not is_stage10_target(target_ent) then
+            if is_stage10 and not is_stage10_target(target_ent) and not plan.stand then
                 local dip = rt.stage10_dip or { state = "attack", t = now }
                 if dip.state == "attack" then
                     if now >= dip.t + 0.01 then
