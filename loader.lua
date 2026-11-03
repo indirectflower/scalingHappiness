@@ -506,6 +506,10 @@ function PluginDefinition:init(api)
             stage10_sign = 1,
             stage10_flip_at = 0,
             stage10_dip = nil,
+            stage10_spawn = nil,
+            stage10_spawn_scan = 0,
+            stage10_ghost_y = 5,
+            stage10_ghost_at = 0,
             cycle_state = "hide",
             cycle_at = 0,
             cycle_target = nil,
@@ -809,7 +813,7 @@ function PluginDefinition:init(api)
                 prio = 0, radius = nil, height = 0, hide = "hover", swap = SWAP_SECONDS },
             { label = "Chicken", match = { "chicken" },
                 prio = 50, radius = nil, height = 0, hide = "none", swap = SWAP_SECONDS,
-                stand = { x = 8, y = 3, gun = true } },
+                stand = { x = 0, y = 15, gun = false } },
         }
         local DEFAULT_PLAN = {
             label = "Basic Zombie / default", prio = 0, radius = nil, height = 0,
@@ -1112,6 +1116,43 @@ function PluginDefinition:init(api)
             if #overlap == 0 then return false end
             local safe_overlap = Workspace:GetPartBoundsInBox(CFrame.new(pos), Vector3.new(4, 4, 4), safe_params)
             return #safe_overlap == 0
+        end
+
+        local function spawn_fresh(inst)
+            local a = inst:GetAttribute("Used")
+            if a == nil then a = inst:GetAttribute("used") end
+            if a == nil then return true end
+            if type(a) == "boolean" then return not a end
+            local s = string.lower(tostring(a))
+            return s ~= "yes" and s ~= "true" and s ~= "1"
+        end
+
+        local function nearest_unused_spawn(origin)
+            local best_p = nil
+            local best_d = math.huge
+            for _, d in ipairs(Workspace:GetDescendants()) do
+                if d:IsA("BasePart") or d:IsA("Model") then
+                    local key = string.lower(d.Name):gsub("[^%a]", "")
+                    if key:find("mobspawn", 1, true) then
+                        local p = d:IsA("BasePart") and d or d.PrimaryPart
+                        if d:IsA("Model") and not p then
+                            p = d:FindFirstChildWhichIsA("BasePart", true)
+                        end
+                        local fresh = spawn_fresh(d)
+                        if not fresh and d:IsA("Model") and p then
+                            fresh = spawn_fresh(p)
+                        end
+                        if p and fresh and d.Parent then
+                            local dist = (origin - p.Position).Magnitude
+                            if dist < best_d then
+                                best_d = dist
+                                best_p = p
+                            end
+                        end
+                    end
+                end
+            end
+            return best_p
         end
 
         local function safe_cframe_for(pos, lift)
@@ -1603,6 +1644,29 @@ function PluginDefinition:init(api)
             local target_pos = target_part.Position
 
             if is_stage10 and not is_stage10_target(target_ent) and not plan.stand then
+                if now >= (rt.stage10_spawn_scan or 0) then
+                    rt.stage10_spawn_scan = now + 1
+                    rt.stage10_spawn = nearest_unused_spawn(root.Position)
+                end
+                local spawn_p = rt.stage10_spawn
+                if spawn_p and not spawn_p.Parent then
+                    rt.stage10_spawn = nil
+                    spawn_p = nil
+                end
+                if spawn_p then
+                    local cf = safe_cframe_for(spawn_p.Position, 3)
+                    rt.hit_pending = false
+                    rt.last_cf = cf
+                    rt.cam_mode = "mob"
+                    rt.cam_target = target_pos
+                    pcall(function()
+                        root.CFrame = cf
+                        root.AssemblyLinearVelocity = Vector3.zero
+                    end)
+                    apply_weapon("melee")
+                    m1_hold(now)
+                    return
+                end
                 local dip = rt.stage10_dip or { state = "attack", t = now }
                 if dip.state == "attack" then
                     if now >= dip.t + 0.01 then
@@ -1742,8 +1806,11 @@ function PluginDefinition:init(api)
                 local hy = math.max(HOVER_HEIGHT, plan.height)
                 local hx = 0
                 if is_stage10 and is_stage10_target(target_ent) then
-                    hx = stage10_sign * 5
-                    hy = stage10_sign * hy
+                    if now >= (rt.stage10_ghost_at or 0) then
+                        rt.stage10_ghost_at = now + 0.2
+                        rt.stage10_ghost_y = (rt.stage10_ghost_y == -5) and 5 or -5
+                    end
+                    hy = rt.stage10_ghost_y or 5
                 end
                 local cf = safe_cframe_for(target_pos + Vector3.new(hx, 0, 0), hy)
                 local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
