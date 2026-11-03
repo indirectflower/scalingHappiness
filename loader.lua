@@ -511,6 +511,12 @@ function PluginDefinition:init(api)
             health_conn = nil,
         }
         local weapon_seen = setmetatable({}, { __mode = "k" })
+        local bones = setmetatable({}, { __mode = "k" })
+        local piles = setmetatable({}, { __mode = "k" })
+        local threat_a, threat_b, pile_pos, pile_rad = {}, {}, {}, {}
+        local bone_fp, pile_fp
+        local bone_ttl, pile_ttl = 8, 6
+        local next_print = 0
 
         local function virtual_mouse(down)
             pcall(function()
@@ -720,6 +726,9 @@ function PluginDefinition:init(api)
         track(Workspace.DescendantAdded:Connect(watch))
         track(Workspace.DescendantRemoving:Connect(function(part) drops[part] = nil end))
         for _, part in Workspace:GetChildren() do watch(part) end
+        track(Workspace.DescendantAdded:Connect(bone_watch))
+        track(Workspace.DescendantRemoving:Connect(function(inst) bones[inst] = nil; piles[inst] = nil end))
+        for _, d in ipairs(Workspace:GetDescendants()) do bone_watch(d) end
 
         local function touch(part, target)
             firetouchinterest(part, target, 0)
@@ -949,6 +958,142 @@ function PluginDefinition:init(api)
         end
         refresh_blocked()
 
+        local function root_of(inst)
+            if inst:IsA("BasePart") then return inst end
+            return inst:IsA("Model") and (inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)) or nil
+        end
+
+        local function mesh_of(inst)
+            local p = root_of(inst)
+            if not p then return nil end
+            if p:IsA("MeshPart") then return p.MeshId ~= "" and p.MeshId or nil end
+            local m = p:FindFirstChildWhichIsA("SpecialMesh")
+            return m and m.MeshId or nil
+        end
+
+        local function print_of(tpl)
+            if not tpl then return nil end
+            return { name = tpl.Name, class = tpl.ClassName, mesh = mesh_of(tpl) }
+        end
+
+        local function load_prints()
+            local mods = game:GetService("ReplicatedStorage"):FindFirstChild("Modules")
+            local fin = mods and mods:FindFirstChild("Finishers")
+            local mod = fin and fin:FindFirstChild("Bonesplosion")
+            if not mod then return end
+            bone_fp, pile_fp = print_of(mod:FindFirstChild("Bone")), print_of(mod:FindFirstChild("BonePile"))
+        end
+
+        local function matches(inst, fp, name)
+            if inst.Name ~= (fp and fp.name or name) then return false end
+            if not (inst:IsA("BasePart") or inst:IsA("Model")) then return false end
+            if fp then
+                if inst.ClassName ~= fp.class then return false end
+                local m = mesh_of(inst)
+                return m == nil or fp.mesh == nil or m == fp.mesh
+            end
+            local m = inst:FindFirstAncestorOfClass("Model")
+            return not (m and m:FindFirstChildOfClass("Humanoid"))
+        end
+
+        local function bone_watch(inst)
+            if matches(inst, bone_fp, "Bone") then bones[inst] = os.clock()
+            elseif matches(inst, pile_fp, "BonePile") then piles[inst] = os.clock() end
+        end
+
+        local function bone_velocity(inst, p)
+            local v = p.AssemblyLinearVelocity
+            if v.Magnitude > 1 then return v end
+            local obj = inst:FindFirstChild("Velocity", true)
+            if obj then
+                if obj:IsA("BodyVelocity") then return obj.Velocity end
+                if obj:IsA("LinearVelocity") then return obj.VectorVelocity end
+                if obj:IsA("Vector3Value") then return obj.Value end
+            end
+            local attr = inst:GetAttribute("Velocity")
+            if typeof(attr) == "Vector3" then return attr end
+            return v
+        end
+
+        local function refresh_threats()
+            table.clear(threat_a); table.clear(threat_b); table.clear(pile_pos); table.clear(pile_rad)
+            local now = os.clock()
+            if not bone_fp and now >= next_print then load_prints(); next_print = now + 2 end
+            local look = 1.2
+            for inst, born in bones do
+                local p = inst.Parent and root_of(inst)
+                if not p or now - born > bone_ttl then bones[inst] = nil
+                else
+                    local v = bone_velocity(inst, p)
+                    if v.Magnitude > 5 then
+                        local n = #threat_a + 1
+                        threat_a[n] = p.Position
+                        threat_b[n] = p.Position + v * look
+                    end
+                end
+            end
+            for inst, born in piles do
+                local p = inst.Parent and root_of(inst)
+                if not p or now - born > pile_ttl then piles[inst] = nil
+                else
+                    local n = #pile_pos + 1
+                    pile_pos[n] = p.Position
+                    pile_rad[n] = math.max(p.Size.X, p.Size.Z) * 0.5 + 2
+                end
+            end
+        end
+
+        local function seg_dist(p, a, b)
+            local ab = b - a
+            local len2 = ab:Dot(ab)
+            if len2 < 1e-4 then return (p - a).Magnitude end
+            local t = math.clamp((p - a):Dot(ab) / len2, 0, 1)
+            return (p - (a + ab * t)).Magnitude
+        end
+
+        local function bone_threat(pos)
+            local r = 6
+            for i = 1, #threat_a do
+                if seg_dist(pos, threat_a[i], threat_b[i]) < r then return true end
+            end
+            for i = 1, #pile_pos do
+                if (pos - pile_pos[i]).Magnitude < pile_rad[i] then return true end
+            end
+            return false
+        end
+
+        local hazard_ray_params = RaycastParams.new()
+        hazard_ray_params.FilterType = Enum.RaycastFilterType.Exclude
+
+        local function get_hazard_y_above()
+            local char = zt_lp.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not root then
+                return nil
+            end
+            local origin = root.Position + Vector3.new(0, 3.5, 0)
+            local ray = Workspace:Raycast(origin, Vector3.new(0, 250, 0), hazard_ray_params)
+            if not ray then
+                return nil
+            end
+            local inst = ray.Instance
+            if not inst then
+                return nil
+            end
+            local n = inst.Name:lower()
+            local is_hazard = n:find("lava", 1, true)
+                or n:find("hazard", 1, true)
+                or n:find("burn", 1, true)
+                or n:find("kill", 1, true)
+                or n:find("magma", 1, true)
+                or n:find("acid", 1, true)
+                or inst.Material == Enum.Material.CrackedLava
+            if not is_hazard then
+                return nil
+            end
+            return ray.Position.Y
+        end
+
         local function is_blocked_strict(pos)
             local overlap = Workspace:GetPartBoundsInBox(CFrame.new(pos), Vector3.new(4, 4, 4), blocked_params)
             if #overlap == 0 then return false end
@@ -967,7 +1112,14 @@ function PluginDefinition:init(api)
             end
             for _, l in candidates do
                 local p = pos + Vector3.new(0, l, 0)
-                if not is_blocked_strict(p) then return CFrame.new(p) end
+                if not is_blocked_strict(p) and not bone_threat(p) then
+                    local cf = CFrame.new(p)
+                    local hazard_y = get_hazard_y_above()
+                    if hazard_y then
+                        cf = CFrame.new(p.X, hazard_y - 5, p.Z)
+                    end
+                    return cf
+                end
             end
             return CFrame.new(pos)
         end
@@ -1267,6 +1419,9 @@ function PluginDefinition:init(api)
             local now_tick = tick()
             if now_tick > refresh_next then
                 refresh_blocked()
+                if zt.enabled then
+                    refresh_threats()
+                end
                 refresh_next = now_tick + 1
             end
             if not zt.enabled then
@@ -1313,14 +1468,26 @@ function PluginDefinition:init(api)
             if now >= (rt.stage_check_at or 0) then
                 rt.stage_check_at = now + 1
                 rt.stage = nil
-                for _, d in ipairs(Workspace:GetDescendants()) do
-                    if d:IsA("Model") then
-                        local hum = d:FindFirstChildOfClass("Humanoid")
-                        if hum and hum.Health > 0 then
-                            local key = string.lower(d.Name):gsub("[^%a]", "")
-                            if key:find("chicken", 1, true) then
-                                rt.stage = 10
-                                break
+                for _, ent in ipairs(entities()) do
+                    local hum = ent:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        local key = string.lower(ent.Name)
+                        if key:find("chicken", 1, true) then
+                            rt.stage = 10
+                            break
+                        end
+                    end
+                end
+                if rt.stage ~= 10 then
+                    for _, d in ipairs(Workspace:GetDescendants()) do
+                        if d:IsA("Model") then
+                            local hum = d:FindFirstChildOfClass("Humanoid")
+                            if hum and hum.Health > 0 then
+                                local key = string.lower(d.Name)
+                                if key:find("chicken", 1, true) then
+                                    rt.stage = 10
+                                    break
+                                end
                             end
                         end
                     end
@@ -1631,7 +1798,7 @@ function PluginDefinition:init(api)
     }
 
     local xhair = {
-        enabled   = api.config:get("crosshair_enabled", true),
+        enabled   = api.config:get("crosshair_enabled", false),
         offset    = api.config:get("crosshair_offset", api.config:get("crosshair_gap", 7)),
         length    = api.config:get("crosshair_length", 13),
         thickness = api.config:get("crosshair_thickness", 2),
