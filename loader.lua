@@ -218,7 +218,7 @@ function PluginDefinition:init(api)
         local version = tonumber(api.config:get("config_schema_version", 0)) or 0
 
         if version < 1 then
-            local legacy_gap = api.config:get("crosshair_gap", nil)
+            local legacy_gap = api.config:get("crosshair_gap", nil) 
             local current_offset = api.config:get("crosshair_offset", nil)
             if current_offset == nil and legacy_gap ~= nil then
                 api.config:set("crosshair_offset", legacy_gap)
@@ -251,9 +251,22 @@ function PluginDefinition:init(api)
                         makefolder(dir)
                     end
                 end
-                local src = readfile("harry_extensions_full.lua")
-                assert(type(src) == "string" and #src > 0, "plugin file unreadable")
-                writefile(AUTOLOAD_FILE, src)
+                writefile(AUTOLOAD_FILE, table.concat({
+                    "task.wait(10)",
+                    "local ok, err = pcall(function()",
+                    "    local src = game:HttpGet(\"" .. LOADER_URL .. "\")",
+                    "    if type(src) == \"string\" and #src > 0 then",
+                    "        local fn, ferr = loadstring(src, \"HarryExtensionsAutoload\")",
+                    "        if fn then",
+                    "            fn()",
+                    "            return",
+                    "        end",
+                    "        error(tostring(ferr))",
+                    "    end",
+                    "    error(\"HttpGet: non-string response\")",
+                    "end)",
+                    "if not ok then warn(\"[Harry Extensions] Autoload failed: \" .. tostring(err)) end",
+                }, "\n") .. "\n")
             elseif type(isfile) == "function" and isfile(AUTOLOAD_FILE) then
                 delfile(AUTOLOAD_FILE)
             end
@@ -726,9 +739,6 @@ function PluginDefinition:init(api)
         track(Workspace.DescendantAdded:Connect(watch))
         track(Workspace.DescendantRemoving:Connect(function(part) drops[part] = nil end))
         for _, part in Workspace:GetChildren() do watch(part) end
-        track(Workspace.DescendantAdded:Connect(bone_watch))
-        track(Workspace.DescendantRemoving:Connect(function(inst) bones[inst] = nil; piles[inst] = nil end))
-        for _, d in ipairs(Workspace:GetDescendants()) do bone_watch(d) end
 
         local function touch(part, target)
             firetouchinterest(part, target, 0)
@@ -1000,6 +1010,9 @@ function PluginDefinition:init(api)
             if matches(inst, bone_fp, "Bone") then bones[inst] = os.clock()
             elseif matches(inst, pile_fp, "BonePile") then piles[inst] = os.clock() end
         end
+        track(Workspace.DescendantAdded:Connect(bone_watch))
+        track(Workspace.DescendantRemoving:Connect(function(inst) bones[inst] = nil; piles[inst] = nil end))
+        for _, d in ipairs(Workspace:GetDescendants()) do bone_watch(d) end
 
         local function bone_velocity(inst, p)
             local v = p.AssemblyLinearVelocity
