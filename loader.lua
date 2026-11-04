@@ -508,8 +508,8 @@ function PluginDefinition:init(api)
             stage10_dip = nil,
             stage10_spawn = nil,
             stage10_spawn_scan = 0,
-            stage10_ghost_y = 5,
-            stage10_ghost_at = 0,
+            ghost_flick_y = 5,
+            ghost_flick_at = 0,
             cycle_state = "hide",
             cycle_at = 0,
             cycle_target = nil,
@@ -808,7 +808,7 @@ function PluginDefinition:init(api)
             { label = "Hunter Zombie", match = { "hunter" },
                 prio = 5, radius = nil, height = 0, hide = "hover", swap = 10 },
             { label = "Brute Zombie", match = { "brute" },
-                prio = 15, radius = 35, height = 7, hide = "hover", swap = 10 },
+                prio = 15, radius = 35, height = 7, hide = "hover", swap = 10, sprio = 40 },
             { label = "Tin Hat Zombie", match = { "tinhat" },
                 prio = 0, radius = nil, height = 0, hide = "hover", swap = SWAP_SECONDS },
             { label = "Chicken", match = { "chicken" },
@@ -871,10 +871,14 @@ function PluginDefinition:init(api)
                         local hum = ent:FindFirstChildOfClass("Humanoid")
                         local skipped = skip and skip[ent] and skip[ent] > clock
                         if hum and hum.Health > 0 and not skipped then
+                            local prio = plan.prio
+                            if rt.stage == 10 and plan.sprio then
+                                prio = plan.sprio
+                            end
                             local offset = ep.Position - origin
                             local d = offset:Dot(offset)
-                            if plan.prio > best_prio or (plan.prio == best_prio and d < best_d) then
-                                best, best_part, best_prio, best_d = ent, ep, plan.prio, d
+                            if prio > best_prio or (prio == best_prio and d < best_d) then
+                                best, best_part, best_prio, best_d = ent, ep, prio, d
                             end
                         end
                     end
@@ -1156,26 +1160,39 @@ function PluginDefinition:init(api)
         end
 
         local function safe_cframe_for(pos, lift)
-            local candidates = {}
+            local lifts = {}
             for _, v in { lift, 5, 3, 1 } do
                 local found = false
-                for _, c in candidates do
+                for _, c in lifts do
                     if c == v then found = true; break end
                 end
-                if not found then candidates[#candidates + 1] = v end
+                if not found then lifts[#lifts + 1] = v end
             end
-            for _, l in candidates do
-                local p = pos + Vector3.new(0, l, 0)
+            local hazard_y = get_hazard_y_above()
+
+            local function try(l, ox, oz)
+                local p = pos + Vector3.new(ox, l, oz)
                 if not is_blocked_strict(p) and not bone_threat(p) then
-                    local cf = CFrame.new(p)
-                    local hazard_y = get_hazard_y_above()
-                    if hazard_y then
-                        cf = CFrame.new(p.X, hazard_y - 5, p.Z)
+                    if hazard_y and p.Y < 100 then
+                        return CFrame.new(p.X, hazard_y - 5, p.Z)
                     end
-                    return cf
+                    return CFrame.new(p)
                 end
             end
-            return CFrame.new(pos)
+
+            for _, l in lifts do
+                local cf = try(l, 0, 0)
+                if cf then return cf end
+            end
+            for _, off in ipairs({ 6, -6, 12, -12, 18, -18 }) do
+                for _, l in lifts do
+                    local cf = try(l, off, 0)
+                    if cf then return cf end
+                    cf = try(l, 0, off)
+                    if cf then return cf end
+                end
+            end
+            return CFrame.new(pos.X, pos.Y + 500, pos.Z)
         end
 
         local function hook_health(character)
@@ -1654,18 +1671,33 @@ function PluginDefinition:init(api)
                     spawn_p = nil
                 end
                 if spawn_p then
-                    local cf = safe_cframe_for(spawn_p.Position, 3)
-                    rt.hit_pending = false
-                    rt.last_cf = cf
-                    rt.cam_mode = "mob"
-                    rt.cam_target = target_pos
-                    pcall(function()
-                        root.CFrame = cf
-                        root.AssemblyLinearVelocity = Vector3.zero
-                    end)
-                    apply_weapon("melee")
-                    m1_hold(now)
-                    return
+                    local crowd = false
+                    for _, e in ipairs(entities()) do
+                        if e ~= target_ent then
+                            local ename = string.lower(e.Name or "")
+                            if not ename:find("chicken", 1, true) then
+                                local hum = e:FindFirstChildOfClass("Humanoid")
+                                if hum and hum.Health > 0 then
+                                    crowd = true
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if not crowd then
+                        local cf = safe_cframe_for(spawn_p.Position, 3)
+                        rt.hit_pending = false
+                        rt.last_cf = cf
+                        rt.cam_mode = "mob"
+                        rt.cam_target = target_pos
+                        pcall(function()
+                            root.CFrame = cf
+                            root.AssemblyLinearVelocity = Vector3.zero
+                        end)
+                        apply_weapon("melee")
+                        m1_hold(now)
+                        return
+                    end
                 end
                 local dip = rt.stage10_dip or { state = "attack", t = now }
                 if dip.state == "attack" then
@@ -1805,12 +1837,12 @@ function PluginDefinition:init(api)
             if rt.mode == "hover" then
                 local hy = math.max(HOVER_HEIGHT, plan.height)
                 local hx = 0
-                if is_stage10 and is_stage10_target(target_ent) then
-                    if now >= (rt.stage10_ghost_at or 0) then
-                        rt.stage10_ghost_at = now + 0.2
-                        rt.stage10_ghost_y = (rt.stage10_ghost_y == -5) and 5 or -5
+                if is_stage10_target(target_ent) then
+                    if now >= (rt.ghost_flick_at or 0) then
+                        rt.ghost_flick_at = now + 0.2
+                        rt.ghost_flick_y = (rt.ghost_flick_y == -5) and 5 or -5
                     end
-                    hy = rt.stage10_ghost_y or 5
+                    hy = rt.ghost_flick_y or 5
                 end
                 local cf = safe_cframe_for(target_pos + Vector3.new(hx, 0, 0), hy)
                 local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
