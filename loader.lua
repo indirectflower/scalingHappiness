@@ -2372,6 +2372,104 @@ function PluginDefinition:init(api)
         end)
     end
 
+    local exp_sec = api.ui:addsection({
+        name = "Experimentals",
+        side = "right",
+    })
+
+    local desync = {
+        enabled = false,
+        frozen_cf = nil,
+        hook_cf = nil,
+        hooked = false,
+        conn = nil,
+    }
+
+    local function desync_unhook()
+        if desync.conn then
+            pcall(function() desync.conn:Disconnect() end)
+            desync.conn = nil
+        end
+        if desync.hooked and type(GENV.hookmetamethod) == "function" and desync.hook_cf then
+            pcall(function()
+                GENV.hookmetamethod(game, "__index", desync.hook_cf)
+            end)
+        end
+        desync.hooked = false
+        desync.hook_cf = nil
+    end
+
+    local function set_desync(value)
+        desync.enabled = value and true or false
+        api.config:set("desync_enabled", desync.enabled)
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not desync.enabled then
+            desync_unhook()
+            if root and desync.frozen_cf then
+                pcall(function()
+                    root.CFrame = desync.frozen_cf
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+            end
+            return
+        end
+        if not root then
+            desync.enabled = false
+            api.config:set("desync_enabled", false)
+            return
+        end
+        desync.frozen_cf = root.CFrame
+        if type(GENV.hookmetamethod) == "function"
+            and type(GENV.newcclosure) == "function"
+            and type(GENV.checkcaller) == "function" then
+            local ok, err = pcall(function()
+                desync.hook_cf = GENV.hookmetamethod(game, "__index", GENV.newcclosure(function(self, key)
+                    if desync.enabled
+                        and not GENV.checkcaller()
+                        and key == "CFrame"
+                        and typeof(self) == "Instance"
+                        and LocalPlayer.Character
+                        and self == LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    then
+                        return desync.frozen_cf
+                    end
+                    local orig = desync.hook_cf
+                    return orig(self, key)
+                end))
+            end)
+            desync.hooked = ok and true or false
+            if not ok then
+                warn("[Harry Extensions] Desync hook failed: " .. tostring(err))
+            end
+        end
+        if not desync.hooked then
+            if desync.conn then
+                pcall(function() desync.conn:Disconnect() end)
+            end
+            desync.conn = track(RunService.Heartbeat:Connect(function()
+                if not desync.enabled or not desync.frozen_cf then return end
+                local c = LocalPlayer.Character
+                local r = c and c:FindFirstChild("HumanoidRootPart")
+                if r then
+                    pcall(function()
+                        r.CFrame = desync.frozen_cf
+                        r.AssemblyLinearVelocity = Vector3.zero
+                    end)
+                end
+            end))
+        end
+    end
+
+    safe_control(exp_sec, "toggle", {
+        name = "Desync",
+        flag = "desync_enabled",
+        default = api.config:get("desync_enabled", false),
+        callback = function(v)
+            set_desync(v)
+        end,
+    })
+
     local crosshair_sec = api.ui:addsection({
         name = "Custom Crosshair",
         side = "left",
@@ -3427,6 +3525,8 @@ function PluginDefinition:init(api)
         if zt_cleanup then
             zt_cleanup()
         end
+
+        desync_unhook()
 
         if respawn_death_conn then
             pcall(function() respawn_death_conn:Disconnect() end)
