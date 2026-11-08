@@ -577,12 +577,7 @@ function PluginDefinition:init(api)
             local root = char:FindFirstChild("HumanoidRootPart")
             if not root then return end
             pcall(function()
-                local delta = cf * root.CFrame:Inverse()
-                for _, p in ipairs(char:GetDescendants()) do
-                    if p:IsA("BasePart") then
-                        p.CFrame = delta * p.CFrame
-                    end
-                end
+                root.CFrame = cf
                 root.AssemblyLinearVelocity = Vector3.zero
             end)
         end
