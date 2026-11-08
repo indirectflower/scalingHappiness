@@ -185,7 +185,7 @@ end
 local PluginDefinition = {
     name = "Harry Extensions",
     author = "harryfemboy",
-    version = "2.17.2",
+    version = "2.17.2-testing",
 }
 
 function PluginDefinition:init(api)
@@ -239,7 +239,7 @@ function PluginDefinition:init(api)
 
     migrate_config()
 
-    local LOADER_URL = "https://raw.githubusercontent.com/indirectflower/scalingHappiness/refs/heads/main/loader.lua"
+    local LOADER_URL = "https://raw.githubusercontent.com/indirectflower/scalingHappiness/refs/heads/main/test.lua"
     local AUTOLOAD_DIR = "lilac/plugins"
     local AUTOLOAD_FILE = AUTOLOAD_DIR .. "/HarryExtensions.luau"
 
@@ -253,19 +253,9 @@ function PluginDefinition:init(api)
                 end
                 writefile(AUTOLOAD_FILE, table.concat({
                     "task.wait(1)",
-                    "local ok, err = pcall(function()",
-                    "    local src = game:HttpGet(\"" .. LOADER_URL .. "\")",
-                    "    if type(src) == \"string\" and #src > 0 then",
-                    "        local fn, ferr = loadstring(src, \"HarryExtensionsAutoload\")",
-                    "        if fn then",
-                    "            fn()",
-                    "            return",
-                    "        end",
-                    "        error(tostring(ferr))",
-                    "    end",
-                    "    error(\"HttpGet: non-string response\")",
+                    "pcall(function()",
+                    "loadstring(game:HttpGet(\"" .. LOADER_URL .. "\"))()",
                     "end)",
-                    "if not ok then warn(\"[Harry Extensions] Autoload failed: \" .. tostring(err)) end",
                 }, "\n") .. "\n")
             elseif type(isfile) == "function" and isfile(AUTOLOAD_FILE) then
                 delfile(AUTOLOAD_FILE)
@@ -369,9 +359,9 @@ function PluginDefinition:init(api)
         end,
     })
 
-    if loader_settings.autoload then
-        set_autoload(true)
-    end
+    loader_settings.autoload = true
+    save_loader_settings()
+    set_autoload(loader_settings.autoload)
 
     local apply_gui_rendering
     local zt_cleanup
@@ -501,19 +491,6 @@ function PluginDefinition:init(api)
             weapon = nil,
             slot_last_press = 0,
             melee_deadline = nil,
-            stage = nil,
-            stage_check_at = 0,
-            stage10_sign = 1,
-            stage10_flip_at = 0,
-            stage10_dip = nil,
-            stage10_spawn = nil,
-            stage10_spawn_scan = 0,
-            ghost_flick_y = 5,
-            ghost_flick_at = 0,
-            cycle_state = "hide",
-            cycle_at = 0,
-            cycle_target = nil,
-            angle = 0,
             mode = nil,
             mode_at = 0,
             m1_down = false,
@@ -824,7 +801,7 @@ function PluginDefinition:init(api)
                 prio = 0, radius = nil, height = 0, hide = "hover", swap = SWAP_SECONDS },
             { label = "Chicken", match = { "chicken" },
                 prio = 50, radius = nil, height = 0, hide = "none", swap = SWAP_SECONDS,
-                stand = { x = 0, y = 15, gun = false } },
+                gun = true },
         }
         local DEFAULT_PLAN = {
             label = "Basic Zombie / default", prio = 0, radius = nil, height = 0,
@@ -853,26 +830,8 @@ function PluginDefinition:init(api)
                 gun = found.gun,
                 height = found.height,
             }
-            if found ~= DEFAULT_PLAN and found.stand then
-                stripped.stand = found.stand
-            end
             plan_cache[name] = stripped
             return stripped
-        end
-
-        local function orbit_radius_for(name)
-            if plan_for(name).radius == 0 then
-                return 0
-            end
-            return FAR_ORBIT_RADIUS
-        end
-
-        local function is_stage10_target(ent)
-            local key = string.lower(ent.Name):gsub("[^%a]", "")
-            for _, p in ipairs({ "ghost", "reaper", "grim" }) do
-                if key:find(p, 1, true) then return true end
-            end
-            return false
         end
 
         local function start_mode(ent)
@@ -893,9 +852,6 @@ function PluginDefinition:init(api)
                         local skipped = skip and skip[ent] and skip[ent] > clock
                         if hum and hum.Health > 0 and not skipped then
                             local prio = plan.prio
-                            if rt.stage == 10 and plan.sprio then
-                                prio = plan.sprio
-                            end
                             local offset = ep.Position - origin
                             local d = offset:Dot(offset)
                             if prio > best_prio or (prio == best_prio and d < best_d) then
@@ -1107,33 +1063,60 @@ function PluginDefinition:init(api)
         local hazard_ray_params = RaycastParams.new()
         hazard_ray_params.FilterType = Enum.RaycastFilterType.Exclude
 
+        local HAZARD_PATTERNS = { "lava", "hazard", "burn", "kill", "magma", "acid", "toxic", "poison", "fire", "flame", "smoke" }
+        local HAZARD_ATTRS = { "Damage", "Hazard", "InstaKill", "KillZone", "Lava", "Burn" }
+
+        local function is_hazard_instance(inst)
+            if not inst or not inst:IsA("BasePart") then
+                return false
+            end
+            local n = inst.Name:lower()
+            for _, pat in ipairs(HAZARD_PATTERNS) do
+                if n:find(pat, 1, true) then
+                    return true
+                end
+            end
+            if inst.Material == Enum.Material.CrackedLava then
+                return true
+            end
+            for _, attr in ipairs(HAZARD_ATTRS) do
+                local v = inst:GetAttribute(attr)
+                if v ~= nil then
+                    if type(v) == "boolean" and v then
+                        return true
+                    end
+                    if type(v) == "number" and v > 0 then
+                        return true
+                    end
+                end
+            end
+            return false
+        end
+
         local function get_hazard_y_above()
             local char = zt_lp.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then
                 return nil
             end
+            hazard_ray_params.FilterDescendantsInstances = { char }
             local origin = root.Position + Vector3.new(0, 3.5, 0)
-            local ray = Workspace:Raycast(origin, Vector3.new(0, 250, 0), hazard_ray_params)
-            if not ray then
-                return nil
+            local remaining = 250
+            for _ = 1, 4 do
+                local ray = Workspace:Raycast(origin, Vector3.new(0, remaining, 0), hazard_ray_params)
+                if not ray then
+                    return nil
+                end
+                if is_hazard_instance(ray.Instance) then
+                    return ray.Position.Y
+                end
+                remaining = remaining - (ray.Position.Y - origin.Y)
+                if remaining <= 1 then
+                    return nil
+                end
+                origin = ray.Position + Vector3.new(0, 0.2, 0)
             end
-            local inst = ray.Instance
-            if not inst then
-                return nil
-            end
-            local n = inst.Name:lower()
-            local is_hazard = n:find("lava", 1, true)
-                or n:find("hazard", 1, true)
-                or n:find("burn", 1, true)
-                or n:find("kill", 1, true)
-                or n:find("magma", 1, true)
-                or n:find("acid", 1, true)
-                or inst.Material == Enum.Material.CrackedLava
-            if not is_hazard then
-                return nil
-            end
-            return ray.Position.Y
+            return nil
         end
 
         local function is_blocked_strict(pos)
@@ -1141,43 +1124,6 @@ function PluginDefinition:init(api)
             if #overlap == 0 then return false end
             local safe_overlap = Workspace:GetPartBoundsInBox(CFrame.new(pos), Vector3.new(4, 4, 4), safe_params)
             return #safe_overlap == 0
-        end
-
-        local function spawn_fresh(inst)
-            local a = inst:GetAttribute("Used")
-            if a == nil then a = inst:GetAttribute("used") end
-            if a == nil then return true end
-            if type(a) == "boolean" then return not a end
-            local s = string.lower(tostring(a))
-            return s ~= "yes" and s ~= "true" and s ~= "1"
-        end
-
-        local function nearest_unused_spawn(origin)
-            local best_p = nil
-            local best_d = math.huge
-            for _, d in ipairs(Workspace:GetDescendants()) do
-                if d:IsA("BasePart") or d:IsA("Model") then
-                    local key = string.lower(d.Name):gsub("[^%a]", "")
-                    if key:find("mobspawn", 1, true) then
-                        local p = d:IsA("BasePart") and d or d.PrimaryPart
-                        if d:IsA("Model") and not p then
-                            p = d:FindFirstChildWhichIsA("BasePart", true)
-                        end
-                        local fresh = spawn_fresh(d)
-                        if not fresh and d:IsA("Model") and p then
-                            fresh = spawn_fresh(p)
-                        end
-                        if p and fresh and d.Parent then
-                            local dist = (origin - p.Position).Magnitude
-                            if dist < best_d then
-                                best_d = dist
-                                best_p = p
-                            end
-                        end
-                    end
-                end
-            end
-            return best_p
         end
 
         local function safe_cframe_for(pos, lift)
@@ -1495,9 +1441,6 @@ function PluginDefinition:init(api)
             rt.mode_at = now
             if switched then
                 rt.mode = start_mode(ent)
-                rt.cycle_target = nil
-                rt.cycle_state = "hide"
-                rt.cycle_at = 0
                 rt.equip_after = nil
                 rt.weapon = nil
                 rt.melee_deadline = now + MELEE_GIVEUP_SECONDS
@@ -1556,44 +1499,6 @@ function PluginDefinition:init(api)
             rt.force_melee = ghost_reaper_near(root.Position)
 
             local now = os.clock()
-
-            if now >= (rt.stage_check_at or 0) then
-                rt.stage_check_at = now + 1
-                rt.stage = nil
-                for _, ent in ipairs(entities()) do
-                    local hum = ent:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.Health > 0 then
-                        local key = string.lower(ent.Name)
-                        if key:find("chicken", 1, true) then
-                            rt.stage = 10
-                            break
-                        end
-                    end
-                end
-                if rt.stage ~= 10 then
-                    for _, d in ipairs(Workspace:GetDescendants()) do
-                        if d:IsA("Model") then
-                            local hum = d:FindFirstChildOfClass("Humanoid")
-                            if hum and hum.Health > 0 then
-                                local key = string.lower(d.Name)
-                                if key:find("chicken", 1, true) then
-                                    rt.stage = 10
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            local is_stage10 = rt.stage == 10
-            local stage10_sign = 1
-            if is_stage10 then
-                if now >= (rt.stage10_flip_at or 0) then
-                    rt.stage10_flip_at = now + 2
-                    rt.stage10_sign = (rt.stage10_sign or 1) * -1
-                end
-                stage10_sign = rt.stage10_sign or 1
-            end
 
             if now < rt.weapon_choice_until and now >= rt.next_choice_scan then
                 rt.next_choice_scan = now + 0.25
@@ -1681,147 +1586,6 @@ function PluginDefinition:init(api)
             local plan = plan_for(target_ent.Name)
             local target_pos = target_part.Position
 
-            if is_stage10 and not is_stage10_target(target_ent) and not plan.stand then
-                if now >= (rt.stage10_spawn_scan or 0) then
-                    rt.stage10_spawn_scan = now + 1
-                    rt.stage10_spawn = nearest_unused_spawn(root.Position)
-                end
-                local spawn_p = rt.stage10_spawn
-                if spawn_p and not spawn_p.Parent then
-                    rt.stage10_spawn = nil
-                    spawn_p = nil
-                end
-                if spawn_p then
-                    local crowd = false
-                    for _, e in ipairs(entities()) do
-                        if e ~= target_ent then
-                            local ename = string.lower(e.Name or "")
-                            if not ename:find("chicken", 1, true) then
-                                local hum = e:FindFirstChildOfClass("Humanoid")
-                                if hum and hum.Health > 0 then
-                                    crowd = true
-                                    break
-                                end
-                            end
-                        end
-                    end
-                    if not crowd then
-                        local cf = safe_cframe_for(spawn_p.Position, 3)
-                        rt.hit_pending = false
-                        rt.last_cf = cf
-                        rt.cam_mode = "mob"
-                        rt.cam_target = target_pos
-                        tp_cframe(cf)
-                        apply_weapon("melee")
-                        m1_hold(now)
-                        return
-                    end
-                end
-                local dip = rt.stage10_dip or { state = "attack", t = now }
-                if dip.state == "attack" then
-                    if now >= dip.t + 0.01 then
-                        dip.state = "hide"
-                        dip.t = now
-                    end
-                    local cf = safe_cframe_for(target_pos + Vector3.new(0, 5, 0))
-                    local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
-                    if (look_at - cf.Position).Magnitude > 0.1 then
-                        cf = CFrame.lookAt(cf.Position, look_at)
-                    end
-                    rt.last_cf = cf
-                    rt.cam_mode = "mob"
-                    rt.cam_target = target_pos
-                    tp_cframe(cf)
-                    apply_weapon("melee")
-                    m1_hold(now)
-                else
-                    if now >= dip.t + 0.5 then
-                        dip.state = "attack"
-                        dip.t = now
-                    end
-                    local cf = safe_cframe_for(target_pos + Vector3.new(0, 1999, 0))
-                    local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
-                    if (look_at - cf.Position).Magnitude > 0.1 then
-                        cf = CFrame.lookAt(cf.Position, look_at)
-                    end
-                    rt.last_cf = cf
-                    rt.cam_mode = "mob"
-                    rt.cam_target = target_pos
-                    tp_cframe(cf)
-                    m1_set(false)
-                    apply_weapon("melee")
-                end
-                rt.stage10_dip = dip
-                return
-            end
-
-            if plan.cycle then
-                apply_weapon((rt.melee_deadline ~= nil and now >= rt.melee_deadline) and "gun" or "melee")
-                local c = plan.cycle
-                if rt.cycle_target ~= target_ent then
-                    rt.cycle_target = target_ent
-                    rt.cycle_state = "hide"
-                    rt.cycle_at = now
-                end
-                local duration = rt.cycle_state == "hide" and c.hide_time or c.attack_time
-                if now - rt.cycle_at >= duration then
-                    rt.cycle_state = rt.cycle_state == "hide" and "attack" or "hide"
-                    rt.cycle_at = now
-                end
-                local hiding = rt.cycle_state == "hide"
-                local offset_x = hiding and c.hide_x or c.attack_x
-                local cf = safe_cframe_for(target_pos + Vector3.new(offset_x, 0, 0), hiding and c.hide_y or c.attack_y)
-                rt.hit_pending = false
-                rt.last_cf = cf
-                rt.cam_mode = "mob"
-                rt.cam_target = target_pos
-                tp_cframe(cf)
-                m1_hold(now)
-                return
-            end
-
-            if plan.orbit then
-                local o = plan.orbit
-                apply_weapon(o.gun and "gun" or "melee")
-                rt.angle = (rt.angle + (o.speed / o.radius) * dt) % (math.pi * 2)
-                local ox = math.cos(rt.angle) * o.radius
-                local oy = o.y
-                if is_stage10 and is_stage10_target(target_ent) then
-                    ox = stage10_sign * math.abs(ox)
-                    oy = stage10_sign * math.abs(oy)
-                end
-                local base = target_pos + Vector3.new(ox, 0, math.sin(rt.angle) * o.radius)
-                local cf = safe_cframe_for(base, oy)
-                local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
-                if (look_at - cf.Position).Magnitude > 0.1 then
-                    cf = CFrame.lookAt(cf.Position, look_at)
-                end
-                rt.hit_pending = false
-                rt.last_cf = cf
-                rt.cam_mode = "mob"
-                rt.cam_target = target_pos
-                tp_cframe(cf)
-                m1_hold(now)
-                return
-            end
-
-            if plan.stand then
-                local st = plan.stand
-                apply_weapon(st.gun and "gun" or "melee")
-                local cf = safe_cframe_for(target_pos + Vector3.new(st.x, 0, 0), st.y)
-                local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
-                if (look_at - cf.Position).Magnitude > 0.1 then
-                    cf = CFrame.lookAt(cf.Position, look_at)
-                end
-                rt.hit_pending = false
-                rt.last_cf = cf
-                rt.cam_mode = "mob"
-                rt.cam_target = target_pos
-                tp_cframe(cf)
-                m1_hold(now)
-                return
-            end
-
             rt.mode = "hover"
             rt.mode_at = now
 
@@ -1830,42 +1594,17 @@ function PluginDefinition:init(api)
                 or (rt.melee_deadline ~= nil and now >= rt.melee_deadline)
             apply_weapon(want_gun and "gun" or "melee")
 
-            if rt.mode == "hover" then
-                local hy = math.max(HOVER_HEIGHT, plan.height)
-                local hx = 0
-                if is_stage10_target(target_ent) then
-                    if now >= (rt.ghost_flick_at or 0) then
-                        rt.ghost_flick_at = now + 0.2
-                        rt.ghost_flick_y = (rt.ghost_flick_y == -5) and 5 or -5
-                    end
-                    hy = rt.ghost_flick_y or 5
-                end
-                local cf = safe_cframe_for(target_pos + Vector3.new(hx, 0, 0), hy)
-                local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
-                if (look_at - cf.Position).Magnitude > 0.1 then
-                    cf = CFrame.lookAt(cf.Position, look_at)
-                end
-                rt.last_cf = cf
-                rt.cam_mode = "mob"
-                rt.cam_target = target_pos
-                tp_cframe(cf)
-                m1_hold(now)
-            else
-
-                local height = math.max(plan.height, FAR_ORBIT_HEIGHT)
-                local base = target_pos + Vector3.new(orbit_radius_for(target_ent.Name), 0, 0)
-
-                local cf = safe_cframe_for(base, height)
-                local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
-                if (look_at - cf.Position).Magnitude > 0.1 then
-                    cf = CFrame.lookAt(cf.Position, look_at)
-                end
-                rt.last_cf = cf
-                rt.cam_mode = "mob"
-                rt.cam_target = target_pos
-                tp_cframe(cf)
-                m1_hold(now)
+            local hy = math.max(HOVER_HEIGHT, plan.height)
+            local cf = safe_cframe_for(target_pos, hy)
+            local look_at = Vector3.new(target_pos.X, cf.Position.Y, target_pos.Z)
+            if (look_at - cf.Position).Magnitude > 0.1 then
+                cf = CFrame.lookAt(cf.Position, look_at)
             end
+            rt.last_cf = cf
+            rt.cam_mode = "mob"
+            rt.cam_target = target_pos
+            tp_cframe(cf)
+            m1_hold(now)
         end
 
         track(RunService.Heartbeat:Connect(function(dt)
